@@ -346,6 +346,10 @@ val settingsPatch = patch(
             0,
             "invoke-static { }, $NATIVE_SNACKBAR_CLASS->initialize()V"
         )
+        YouTubeActivityOnCreateFingerprint.method.addInstruction(
+    0,
+    "invoke-static/range { p0 .. p0 }, Lapp/morphe/extension/youtube/patches/MikuTubePatch;->initialize(Landroid/content/Context;)V"
+)
 
         // Show the snackbars right above the navigation bar and the miniplayer.
         BottomUiContainerOnLayoutFingerprint.let {
