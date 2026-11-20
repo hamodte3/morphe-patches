@@ -4,11 +4,11 @@ group = "app.morphe"
 
 patches {
     about {
-        name = "Morphe Patches"
-        description = "Patches for Morphe"
+        name = "MikuTube Patches"
+        description = "Custom MikuTube patches for Morphe"
         source = "git@github.com:MorpheApp/morphe-patches.git"
-        author = "MorpheApp"
-        contact = "na"
+        author = "Abo Leen"
+        contact = "t.me/ioke_00"
         website = "https://morphe.software"
         license = "GNU General Public License v3.0, with additional GPL section 7 requirements"
     }
