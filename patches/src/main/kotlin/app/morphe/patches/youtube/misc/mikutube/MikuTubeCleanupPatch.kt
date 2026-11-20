@@ -1,5 +1,6 @@
 package app.morphe.patches.youtube.misc.mikutube
 
+import app.morphe.patcher.patch.deleteResource
 import app.morphe.patcher.patch.listDecodableFiles
 import app.morphe.patcher.patch.patch
 import app.morphe.patcher.patch.resourceFile
@@ -36,10 +37,22 @@ private val COMPONENT_TAGS = arrayOf(
     "activity-alias"
 )
 
+private val LOCALE_CLEANUP_BASES = setOf("values", "raw", "xml", "drawable")
+
+private val KEEP_QUALIFIER_REGEX = Regex(
+    """^(ar($|-)|en($|-)|b\+ar|b\+en|v\d+|night($|-)|notnight|land($|-)|port($|-)|sw\d+|w\d+|h\d+|ldrtl|ldltr|mcc|mnc|small|normal|large|xlarge|long|notlong|round|notround|widecg|nowidecg|highdr|lowdr|car($|-)|desk|television|watch|vrheadset|ldpi|mdpi|hdpi|xhdpi|xxhdpi|xxxhdpi|nodpi|tvdpi|anydpi|nokeys|qwerty|12key|keysexposed|keyshidden|keyssoft|notouch|finger|nonav|dpad|trackball|wheel)"""
+)
+
+private val LOW_DPI_DIR_REGEX = Regex(
+    """^((?:drawable|mipmap)(?:-(?:night|ldrtl))?)-(ldpi|mdpi|hdpi)$"""
+)
+
+private val HIGH_DPIS = arrayOf("xhdpi", "xxhdpi", "xxxhdpi")
+
 @Suppress("unused")
 val mikuTubeCleanupPatch = patch(
     name = "MikuTube cleanup",
-    description = "Cleans AndroidManifest components, permissions, and queries, and truncates license files and promo Lottie animations."
+    description = "Hardens AndroidManifest, strips unused locales (keeps ar/en), cleans low-DPI images safely, and truncates licenses & promo Lottie animations."
 ) {
     compatibleWith(COMPATIBILITY_YOUTUBE)
 
@@ -86,7 +99,48 @@ val mikuTubeCleanupPatch = patch(
             }
         }
 
-        // 2. Truncate third-party licenses & promo Lottie JSONs in res/raw
+        // 2. Strip unused locales (keep ar & en + all system/theme qualifiers)
+        runCatching {
+            val allResFiles = listDecodableFiles("res/*/*").toList()
+            val deletedPaths = HashSet<String>()
+
+            allResFiles.forEach { path ->
+                val rel = path.removePrefix("res/")
+                val dir = rel.substringBefore('/', "")
+                val dashIdx = dir.indexOf('-')
+                if (dashIdx <= 0) return@forEach
+
+                val base = dir.substring(0, dashIdx)
+                if (base !in LOCALE_CLEANUP_BASES) return@forEach
+
+                val qualifier = dir.substring(dashIdx + 1)
+                if (!KEEP_QUALIFIER_REGEX.containsMatchIn(qualifier)) {
+                    deleteResource(path)
+                    deletedPaths.add(path)
+                }
+            }
+
+            // 3. Safe low-DPI cleanup (delete ldpi/mdpi/hdpi only if xhdpi/xxhdpi/xxxhdpi exists)
+            val remainingResSet = allResFiles.filterNot { it in deletedPaths }.toHashSet()
+            remainingResSet.forEach { path ->
+                val rel = path.removePrefix("res/")
+                val dir = rel.substringBefore('/', "")
+                val fileName = rel.substringAfter('/', "")
+                if (fileName.isEmpty()) return@forEach
+
+                val match = LOW_DPI_DIR_REGEX.matchEntire(dir) ?: return@forEach
+                val prefix = match.groupValues[1]
+
+                val hasHighDpiAlternative = HIGH_DPIS.any { highDpi ->
+                    "res/$prefix-$highDpi/$fileName" in remainingResSet
+                }
+                if (hasHighDpiAlternative) {
+                    deleteResource(path)
+                }
+            }
+        }
+
+        // 4. Truncate third-party licenses & promo Lottie JSONs in res/raw
         runCatching {
             listDecodableFiles("res/raw/*").forEach { path ->
                 val fileName = path.substringAfterLast('/').lowercase()
@@ -110,7 +164,7 @@ val mikuTubeCleanupPatch = patch(
             }
         }
 
-        // 3. Truncate third-party licenses in assets if exposed
+        // 5. Truncate third-party licenses in assets if exposed
         runCatching {
             listDecodableFiles("assets/third_party_license*").forEach { path ->
                 resourceFile(path, false).writeBytes(ByteArray(0))
