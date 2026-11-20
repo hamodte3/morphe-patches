@@ -66,15 +66,11 @@ internal fun baseChangeHeaderPatch(
 
     execute {
         preferenceScreen.addPreferences(
-            if (custom == null) {
-                ListPreference("morphe_header_logo")
-            } else {
-                ListPreference(
-                    key = "morphe_header_logo",
-                    entriesKey = "morphe_header_logo_custom_entries",
-                    entryValuesKey = "morphe_header_logo_custom_entry_values"
-                )
-            }
+            ListPreference(
+                key = "morphe_header_logo",
+                entriesKey = "morphe_header_logo_custom_entries",
+                entryValuesKey = "morphe_header_logo_custom_entry_values"
+            )
         )
 
         logoResourceNames.forEach { logo ->
@@ -105,11 +101,6 @@ internal fun baseChangeHeaderPatch(
     }
 }
 
-/**
- * The images of the custom header folder at [path], each in the folder of its density, or null
- * when the folder has none of [densities] or leaves out one of [fileNames] in a density it has.
- * The reason is logged, as a failed option validation does not say what is wrong.
- */
 private fun customHeaderImages(path: String, densities: Set<String>, fileNames: Array<String>): List<File>? {
     val folder = File(path.trim())
     val densityFolders = folder.listFiles { file -> file.isDirectory && file.name in densities }
