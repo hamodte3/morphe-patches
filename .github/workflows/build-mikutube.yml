@@ -23,20 +23,28 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build MikuTube Patches
+      - name: Build MikuTube Patches (Android)
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_USER: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x ./gradlew
-          ./gradlew :patches:build -x test -x check \
+          ./gradlew :patches:buildAndroid -x test -x check \
             -Pgpr.user="${GITHUB_ACTOR}" \
             -Pgpr.key="${GITHUB_TOKEN}"
-          ls -lh patches/build/libs/
+          find patches/build -maxdepth 3 -name "*.mpp" -ls
+          for f in patches/build/libs/*.mpp; do
+            case "$f" in *-sources.mpp|*-javadoc.mpp) continue;; esac
+            echo "=== Checking DEX inside $f ==="
+            unzip -l "$f" | grep -E "classes\.dex|extensions" | head -n 10
+          done
 
       - name: Upload Patches Bundle
         uses: actions/upload-artifact@v4
         with:
           name: MikuTube-Patches
-          path: patches/build/libs/*.mpp
+          path: |
+            patches/build/libs/*.mpp
+            !patches/build/libs/*-sources.mpp
+            !patches/build/libs/*-javadoc.mpp
