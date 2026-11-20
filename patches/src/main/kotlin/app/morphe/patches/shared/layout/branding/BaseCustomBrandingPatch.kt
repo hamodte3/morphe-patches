@@ -45,7 +45,6 @@ import java.io.File
 import java.util.logging.Logger
 
 private val mipmapDirectories = mapOf(
-    // Target app does not have ldpi icons.
     "mipmap-mdpi" to "108x108 px",
     "mipmap-hdpi" to "162x162 px",
     "mipmap-xhdpi" to "216x216 px",
@@ -63,11 +62,8 @@ private val iconStyleNames = arrayOf(
 
 private const val ORIGINAL_USER_ICON_STYLE_NAME = "original"
 private const val CUSTOM_USER_ICON_STYLE_NAME = "custom"
-
-// The icon the app uses when no icon style was selected.
 private const val DEFAULT_ICON_STYLE_NAME = "black"
 
-// Derived from the bundled styles so a new style cannot be missing here.
 private val iconStyleValues = buildMap {
     put("Automatic", null)
     put("Original", ORIGINAL_USER_ICON_STYLE_NAME)
@@ -91,12 +87,9 @@ private val USER_CUSTOM_ADAPTIVE_FILE_NAMES = arrayOf(
 )
 
 private const val USER_CUSTOM_MONOCHROME_FILE_NAME = "${LAUNCHER_ADAPTIVE_MONOCHROME_PREFIX}_$CUSTOM_USER_ICON_STYLE_NAME.xml"
-
-// Custom notification icon can be provided as an XML vector drawable or a PNG raster image.
 private const val USER_CUSTOM_NOTIFICATION_ICON_XML_FILE_NAME = "${NOTIFICATION_ICON_NAME}_$CUSTOM_USER_ICON_STYLE_NAME.xml"
 private const val USER_CUSTOM_NOTIFICATION_ICON_PNG_FILE_NAME = "${NOTIFICATION_ICON_NAME}_$CUSTOM_USER_ICON_STYLE_NAME.png"
 
-// Drawable DPI directories for PNG notification icons.
 private val notificationIconPngDirectories = mapOf(
     "drawable-mdpi" to "24x24 px",
     "drawable-hdpi" to "36x36 px",
@@ -105,11 +98,6 @@ private val notificationIconPngDirectories = mapOf(
     "drawable-xxxhdpi" to "96x96 px",
 )
 
-/**
- * The icon files of the custom icon folder at [path], each in the resource folder it goes to, or
- * null when the folder has none or holds only part of the adaptive icon in a density.
- * The reason is logged, as a failed option validation does not say what is wrong.
- */
 private fun customIconFiles(path: String): List<File>? {
     val folder = File(path.trim())
     if (!folder.isDirectory) {
@@ -139,16 +127,8 @@ private fun customIconFiles(path: String): List<File>? {
 
 internal const val EXTENSION_CLASS = "Lapp/morphe/extension/shared/patches/CustomBrandingPatch;"
 
-// Must be named in the 'app.morphe' namespace, otherwise the log is not published.
 private val logger = Logger.getLogger(Patch::class.java.name)
 
-/**
- * Shared custom branding patch for YouTube and YT Music.
- *
- * @param appLauncherIconNames Launcher icons of the app that can be selected in the app settings,
- * as the icon style name and the mipmap resource name. They are not patch option values,
- * because older app versions do not have them.
- */
 internal fun baseCustomBrandingPatch(
     originalLauncherIconName: () -> String,
     originalNotificationIconName: String,
@@ -188,13 +168,13 @@ internal fun baseCustomBrandingPatch(
         title = "Custom icon",
         description = """
             Folder with images to use as a custom icon.
-            
+
             The folder must contain one or more of the following folders, depending on the DPI of the device:
             ${mipmapDirectories.keys.joinToString("\n") { "- $it" }}
-            
+
             Each of the folders must contain all of the following files:
             ${USER_CUSTOM_ADAPTIVE_FILE_NAMES.joinToString("\n")}
-            
+
             The image dimensions must be as follows:
             ${mipmapDirectories.map { (dpi, dim) -> "- $dpi: $dim" }.joinToString("\n")}
 
@@ -230,13 +210,15 @@ internal fun baseCustomBrandingPatch(
         it == null || iconStyleValues.containsValue(it)
     }
 
+    fun resolvedCustomName(): String? = customName ?: if (isYouTubeMusic) null else "MikuTube"
+    val hasBundledCustomIcon = !isYouTubeMusic
+
     block()
 
     dependsOn(
         fixRecycledBitmapPatch,
         patch {
             execute {
-                // Custom branding changes the default splash screen style to the Morphe animation.
                 setExtensionIsPatchIncluded(EXTENSION_CLASS)
 
                 mainActivityOnCreateFingerprint.method.addInstruction(
@@ -245,8 +227,8 @@ internal fun baseCustomBrandingPatch(
                 )
 
                 NumberOfPresetAppNamesExtensionFingerprint.method.returnEarly(numberOfPresetAppNames)
-                UserProvidedCustomNameExtensionFingerprint.method.returnEarly(customName != null)
-                UserProvidedCustomIconExtensionFingerprint.method.returnEarly(customIcon != null)
+                UserProvidedCustomNameExtensionFingerprint.method.returnEarly(resolvedCustomName() != null)
+                UserProvidedCustomIconExtensionFingerprint.method.returnEarly(customIcon != null || hasBundledCustomIcon)
                 OriginalLauncherIconNameExtensionFingerprint.method.returnEarly(originalLauncherIconName())
                 OriginalNotificationIconNameExtensionFingerprint.method.returnEarly(originalNotificationIconName)
 
@@ -263,7 +245,7 @@ internal fun baseCustomBrandingPatch(
                                 index,
                                 """
                                     invoke-static { v$register }, $EXTENSION_CLASS->$methodName(I)I
-                                    move-result v$register                                
+                                    move-result v$register
                                 """
                             )
                         }
@@ -279,7 +261,7 @@ internal fun baseCustomBrandingPatch(
                             index,
                             """
                                 invoke-static { v$register }, $EXTENSION_CLASS->getSmallIcon(I)I
-                                move-result v$register                                
+                                move-result v$register
                             """
                         )
                     }
@@ -287,9 +269,8 @@ internal fun baseCustomBrandingPatch(
             }
 
             finalize {
-                val iconStyle = resolveIconStyle(appIconStyle, customIcon)
+                val iconStyle = resolveIconStyle(appIconStyle, customIcon, hasBundledCustomIcon)
 
-                // The icon the app starts with, before the user selects one in the app settings.
                 DefaultIconStyleNameExtensionFingerprint.method.returnEarly(iconStyle)
 
                 val isMounted = isMountedInstall(originalAppPackageName)
@@ -298,32 +279,25 @@ internal fun baseCustomBrandingPatch(
                     isMounted && iconStyle != ORIGINAL_USER_ICON_STYLE_NAME
                 )
 
-                // The replaced notification icon does not match the tint of the original icon.
                 MountedNotificationIconAppliedExtensionFingerprint.method.returnEarly(
-                    isMounted && hasMountedNotificationIcon(iconStyle, customIcon)
+                    isMounted && hasMountedNotificationIcon(iconStyle, customIcon, hasBundledCustomIcon)
                 )
             }
         },
         patch {
             finalize {
-                val useCustomName = customName != null
+                val finalCustomName = resolvedCustomName()
+                val useCustomName = finalCustomName != null
 
-                // The UI preferences cannot be selectively added here, because the settings finalize
-                // block may have already run and the settings are already wrote to file.
-                // Instead, the non-functional in-app settings are removed on app startup by extension code.
                 if (isMountedInstall(originalAppPackageName)) {
-                    // A mounted installation keeps the original app installed and the system parses the
-                    // manifest of the stock APK, so the launch aliases and any manifest branding
-                    // attribute are never used. Resource ids are unchanged by patching and are still
-                    // resolved from the mounted APK, and replacing what those ids point to is the only
-                    // way the branding of a mounted install can be changed.
                     applyMountedBranding(
                         originalLauncherIconName(),
                         originalNotificationIconName,
                         originalAppName,
                         appIconStyle,
                         customIcon,
-                        customName
+                        finalCustomName,
+                        hasBundledCustomIcon
                     )
 
                     return@finalize
@@ -337,7 +311,6 @@ internal fun baseCustomBrandingPatch(
                     )
                     val intentFilters = originalAlias.children
 
-                    // Create launch aliases that can be programmatically selected in app.
                     fun createAlias(
                         aliasName: String,
                         iconMipmapName: String,
@@ -346,13 +319,8 @@ internal fun baseCustomBrandingPatch(
                         enabled: Boolean,
                     ) {
                         val label = if (useCustomName) {
-                            if (customName == null) {
-                                "Custom" // Dummy text, and normally cannot be seen.
-                            } else {
-                                customName!!
-                            }
+                            finalCustomName ?: "Custom"
                         } else if (appNameIndex == 1) {
-                            // Indexing starts at 1.
                             originalAppName
                         } else {
                             "@string/morphe_custom_branding_name_entry_$appNameIndex"
@@ -365,7 +333,6 @@ internal fun baseCustomBrandingPatch(
                             setAttribute("android:label", label)
                             setAttribute("android:targetActivity", mainActivityName)
 
-                            // Copy all intents from the original alias so long press actions still work.
                             if (isYouTubeMusic) {
                                 appendChild("intent-filter") {
                                     appendChild("action") { setAttribute("android:name", "android.intent.action.MAIN") }
@@ -377,33 +344,20 @@ internal fun baseCustomBrandingPatch(
                         }
                     }
 
-                    val enabledNameIndex = if (useCustomName) numberOfPresetAppNames else 1 // 1 indexing
-                    val enabledIconStyle = resolveIconStyle(appIconStyle, customIcon)
+                    val enabledNameIndex = if (useCustomName) numberOfPresetAppNames else 1
+                    val enabledIconStyle = resolveIconStyle(appIconStyle, customIcon, hasBundledCustomIcon)
 
-                    // The application icon ('static' icon) is used wherever a launch alias is not,
-                    // such as Android Auto, the app list of the system settings, the push
-                    // notification on some devices, and the apk before installing. Leaving it
-                    // unpatched is what made those places show the unpatched icon.
-                    //
-                    // It cannot be selected at runtime, so it stays at the icon chosen while
-                    // patching even if a different icon is later selected in the app. The original
-                    // icon is restored by patching with the 'Original' icon style.
                     if (enabledIconStyle != ORIGINAL_USER_ICON_STYLE_NAME) {
                         application.setAttribute("android:icon", "@mipmap/$LAUNCHER_RESOURCE_NAME_PREFIX$enabledIconStyle")
                     }
 
-                    // The launch aliases only declare 'android:icon', so a launcher that prefers the
-                    // round icon of the app keeps showing the unpatched icon. Adaptive icons replaced
-                    // round icons in Android 8 and the target apps require Android 8 or later, so the
-                    // declaration is removed instead of adding an obsolete icon to every alias.
                     application.removeAttribute("android:roundIcon")
 
-                    for (appNameIndex in 1 .. numberOfPresetAppNames) {
+                    for (appNameIndex in 1..numberOfPresetAppNames) {
                         fun aliasName(name: String): String = ".morphe_" + name + '_' + appNameIndex
 
                         val useCustomNameLabel = (useCustomName && appNameIndex == numberOfPresetAppNames)
 
-                        // Original icon.
                         createAlias(
                             aliasName = aliasName(ORIGINAL_USER_ICON_STYLE_NAME),
                             iconMipmapName = originalLauncherIconName(),
@@ -413,7 +367,6 @@ internal fun baseCustomBrandingPatch(
                                     enabledIconStyle == ORIGINAL_USER_ICON_STYLE_NAME,
                         )
 
-                        // Bundled icons.
                         iconStyleNames.forEach { style ->
                             createAlias(
                                 aliasName = aliasName(style),
@@ -424,8 +377,6 @@ internal fun baseCustomBrandingPatch(
                             )
                         }
 
-                        // Launcher icons of the app. Not enabled here, because they can only be
-                        // selected in the app settings.
                         appLauncherIconNames().forEach { (style, iconMipmapName) ->
                             createAlias(
                                 aliasName = aliasName(style),
@@ -436,14 +387,6 @@ internal fun baseCustomBrandingPatch(
                             )
                         }
 
-                        // User provided custom icon.
-                        //
-                        // Must add all aliases even if the user did not provide a custom icon of their own.
-                        // This is because if the user installs with an option, then repatches without the option,
-                        // the alias must still exist because if it was previously enabled, and then it's removed
-                        // the app will become broken and cannot launch. Even if the app data is cleared
-                        // it still cannot be launched and the only fix is to uninstall the app.
-                        // To prevent this, always include all aliases and use dummy data if needed.
                         createAlias(
                             aliasName = aliasName(CUSTOM_USER_ICON_STYLE_NAME),
                             iconMipmapName = LAUNCHER_RESOURCE_NAME_PREFIX + CUSTOM_USER_ICON_STYLE_NAME,
@@ -454,32 +397,20 @@ internal fun baseCustomBrandingPatch(
                         )
                     }
 
-                    // Can only be done after adding the new aliases.
                     if (isYouTubeMusic) {
-                        // Remove the main action from the original alias, otherwise two apps icons
-                        // can be shown in the launcher.
                         originalAlias.elementByAttribute(
                             "android:name",
                             "android.intent.action.MAIN"
                         ).remove()
                     } else {
-                        // All intent filters were copied to the new aliases. Remove them from the
-                        // original alias, otherwise two app icons can be shown in the launcher, and
-                        // intents such as the search shortcut match two activities of the app and
-                        // Android asks which one to use.
                         originalAlias.elements("intent-filter").toList().forEach { it.remove() }
                     }
 
                     application.setAttribute(
                         "android:label",
                         if (useCustomName) {
-                            // Use custom name everywhere.
-                            customName!!
+                            finalCustomName!!
                         } else {
-                            // The YT application name can appear in some places alongside the system
-                            // YouTube app, such as the settings app list and in the "open with" file picker.
-                            // Because the YouTube app cannot be completely uninstalled and only disabled,
-                            // use a custom name for this situation to disambiguate which app is which.
                             "@string/morphe_custom_branding_name_entry_2"
                         }
                     )
@@ -489,8 +420,10 @@ internal fun baseCustomBrandingPatch(
     )
 
     execute {
-        val useCustomName = customName != null
-        val useCustomIcon = customIcon != null
+        val finalCustomName = resolvedCustomName()
+        val useCustomName = finalCustomName != null
+        val customIconPath = customIcon
+        val useCustomIcon = customIconPath != null || hasBundledCustomIcon
 
         if (appIconStyle == CUSTOM_USER_ICON_STYLE_NAME && !useCustomIcon) {
             throw PatchException("The 'Custom' app icon requires the 'Custom icon' option.")
@@ -508,7 +441,6 @@ internal fun baseCustomBrandingPatch(
             ListPreference("morphe_custom_branding_name")
         }
 
-        // YouTube 21.41+ also has launcher icons of its own.
         val arrayKeySuffix = if (appLauncherIconNames().isEmpty()) "" else "_21_41"
 
         if (useCustomIcon) {
@@ -558,7 +490,6 @@ internal fun baseCustomBrandingPatch(
 
         copyResources(
             "custom-branding",
-            // Copy template user icon, because the aliases must be added even if no user icon is provided.
             ResourceGroup(
                 "drawable",
                 USER_CUSTOM_MONOCHROME_FILE_NAME,
@@ -570,7 +501,6 @@ internal fun baseCustomBrandingPatch(
             )
         )
 
-        // Copy template icon files.
         mipmapDirectories.keys.forEach { dpi ->
             copyResources(
                 "custom-branding",
@@ -582,15 +512,19 @@ internal fun baseCustomBrandingPatch(
             )
         }
 
-        // Copy the user provided icon files here and not in the finalize block, because a mounted
-        // installation uses them to replace the icon of the app and that is done while finalizing.
-        if (useCustomIcon) {
-            // Reading the option already checked the folder, see customIconFiles
-            customIconFiles(customIcon!!)!!.forEach { file ->
-                // Replaced without decoding what it replaces.
+        if (customIconPath != null) {
+            customIconFiles(customIconPath)!!.forEach { file ->
                 val targetFile = resourceFile("res/${file.parentFile.name}/${file.name}", false)
                 targetFile.parentFile.mkdirs()
                 file.copyTo(targetFile, overwrite = true)
+            }
+        } else if (hasBundledCustomIcon) {
+            notificationIconPngDirectories.keys.forEach { dpi ->
+                bundledBrandingResource("$dpi/$USER_CUSTOM_NOTIFICATION_ICON_PNG_FILE_NAME")?.let { bytes ->
+                    val targetFile = resourceFile("res/$dpi/$USER_CUSTOM_NOTIFICATION_ICON_PNG_FILE_NAME", false)
+                    targetFile.parentFile.mkdirs()
+                    targetFile.writeBytes(bytes)
+                }
             }
         }
 
@@ -598,23 +532,14 @@ internal fun baseCustomBrandingPatch(
     }
 }
 
-/**
- * Applies the branding of a mounted (root) install by replacing the contents of the resources
- * the manifest of the stock APK already points to.
- *
- * @param originalNotificationIconName The notification icon resource name of the unpatched app.
- * @param originalAppName The app name resource reference declared by the unpatched app.
- * @param appIconStyle The icon style patch option, or null to use the default icon.
- * @param customIcon The custom icon patch option folder, if one was provided.
- * @param customName The custom app name patch option, if one was provided.
- */
 private fun applyMountedBranding(
     originalLauncherIconName: String,
     originalNotificationIconName: String,
     originalAppName: String,
     appIconStyle: String?,
     customIcon: String?,
-    customName: String?
+    customName: String?,
+    hasBundledCustomIcon: Boolean = false
 ) {
     if (customName != null) {
         val resourceNames = appNameResourceNames(originalAppName)
@@ -622,8 +547,6 @@ private fun applyMountedBranding(
         resourceNames.forEachIndexed { index, resourceName ->
             if (setAppNameResource(resourceName, customName)) return@forEachIndexed
 
-            // The name the patch declares must exist, but a name found in the manifest can
-            // point to a resource that is not declared in the default strings file.
             if (index == 0) {
                 throw PatchException("Could not find the app name resource: $resourceName")
             }
@@ -634,46 +557,42 @@ private fun applyMountedBranding(
         logger.info("Mounted install app name: $customName (${resourceNames.joinToString()})")
     }
 
-    val iconStyle = resolveIconStyle(appIconStyle, customIcon)
+    val iconStyle = resolveIconStyle(appIconStyle, customIcon, hasBundledCustomIcon)
 
-    // Nothing to replace, the app already uses the original icon.
     if (iconStyle == ORIGINAL_USER_ICON_STYLE_NAME) return
 
     setLauncherIconResource(originalLauncherIconName, iconStyle)
     logger.info("Mounted install app icon: $iconStyle")
 
-    if (setNotificationIconResource(originalNotificationIconName, iconStyle, customIcon)) {
+    if (setNotificationIconResource(originalNotificationIconName, iconStyle, customIcon, hasBundledCustomIcon)) {
         logger.info("Mounted install notification icon: $iconStyle")
     }
 }
 
-/**
- * The bytes of a branding resource bundled with the patch, or null if it does not exist.
- */
 private fun bundledBrandingResource(resourceFile: String): ByteArray? =
     inputStreamFromBundledResource("custom-branding", resourceFile)?.use { it.readBytes() }
 
-/**
- * If the app is installed by mounting (root).
- *
- * The installer type is not reported to patches, so it is inferred from the package name, which
- * only a regular installation changes. Other patches change it while executing, so this is accurate
- * only after all patches have executed.
- */
 private fun isMountedInstall(originalAppPackageName: String) =
     setOrGetFallbackPackageName(originalAppPackageName) == originalAppPackageName
 
-/**
- * If the notification icon of the app is replaced by the icon style.
- *
- * The bundled custom notification icon is only a placeholder for the launch aliases of a regular
- * install, so a custom style keeps the original icon unless the user provided one of their own.
- */
-private fun hasMountedNotificationIcon(iconStyle: String, customIcon: String?): Boolean {
+private fun hasMountedNotificationIcon(
+    iconStyle: String,
+    customIcon: String?,
+    hasBundledCustomIcon: Boolean = false
+): Boolean {
     if (iconStyle == ORIGINAL_USER_ICON_STYLE_NAME) return false
     if (iconStyle != CUSTOM_USER_ICON_STYLE_NAME) return true
 
-    val iconPathFile = File(customIcon!!.trim())
+    if (customIcon == null) {
+        return hasBundledCustomIcon && (
+            bundledBrandingResource("drawable/$USER_CUSTOM_NOTIFICATION_ICON_XML_FILE_NAME") != null ||
+            notificationIconPngDirectories.keys.any { dpi ->
+                bundledBrandingResource("$dpi/$USER_CUSTOM_NOTIFICATION_ICON_PNG_FILE_NAME") != null
+            }
+        )
+    }
+
+    val iconPathFile = File(customIcon.trim())
 
     return iconPathFile.resolve("drawable/$USER_CUSTOM_NOTIFICATION_ICON_XML_FILE_NAME").exists() ||
             notificationIconPngDirectories.keys.any { dpi ->
@@ -681,17 +600,14 @@ private fun hasMountedNotificationIcon(iconStyle: String, customIcon: String?): 
             }
 }
 
-/**
- * The icon style to use, resolving the 'Automatic' option value.
- */
-private fun resolveIconStyle(appIconStyle: String?, customIcon: String?): String =
+private fun resolveIconStyle(
+    appIconStyle: String?,
+    customIcon: String?,
+    hasBundledCustomIcon: Boolean = false
+): String =
     appIconStyle
-        ?: if (customIcon != null) CUSTOM_USER_ICON_STYLE_NAME else DEFAULT_ICON_STYLE_NAME
+        ?: if (customIcon != null || hasBundledCustomIcon) CUSTOM_USER_ICON_STYLE_NAME else DEFAULT_ICON_STYLE_NAME
 
-/**
- * The names of the string resources that decide the app name a launcher and the system show.
- * The name the patch declares is first, followed by any additional name the manifest points to.
- */
 private fun appNameResourceNames(originalAppName: String): List<String> {
     val declaredName = stringResourceNameOrNull(originalAppName)
         ?: throw PatchException("Expected a string resource but found: $originalAppName")
@@ -699,9 +615,6 @@ private fun appNameResourceNames(originalAppName: String): List<String> {
     val resourceNames = mutableListOf(declaredName)
 
     resourceXml("AndroidManifest.xml").use { manifest ->
-        // A launcher shows the label of the launch activity and falls back to the application
-        // label, and the app list of the system settings always shows the application label.
-        // These can be different resources, such as "YT Music" and "YouTube Music".
         val application = manifest.elements("application").first()
         stringResourceNameOrNull(application.attribute("android:label").orEmpty())?.let {
             resourceNames += it
@@ -721,22 +634,12 @@ private fun appNameResourceNames(originalAppName: String): List<String> {
     return resourceNames.distinct()
 }
 
-/**
- * The resource name of a string reference such as '@string/app_name', or null for anything
- * else such as a literal or a framework resource like '@android:string/untitled'.
- */
 private fun stringResourceNameOrNull(reference: String): String? =
     if (reference.startsWith("@string/")) reference.substring("@string/".length) else null
 
 private fun XmlElement.isLauncherEntry(): Boolean =
     elements("category").any { it.attribute("android:name") == "android.intent.category.LAUNCHER" }
 
-/**
- * Sets the app name of the default locale, and removes the localized app names because
- * a launcher resolves the app name using the locale of the device and not of the app.
- *
- * @return If the resource was declared and set for the default locale.
- */
 private fun setAppNameResource(resourceName: String, appName: String): Boolean {
     var defaultAppNameSet = false
 
@@ -762,37 +665,38 @@ private fun setAppNameResource(resourceName: String, appName: String): Boolean {
     return defaultAppNameSet
 }
 
-/**
- * Replaces the notification icon of the app with a bundled icon style, or with the
- * notification icon the user provided.
- *
- * The original icons are removed and not overwritten, because they are raster images for each
- * density and a density qualified resource is a better match than the vector that replaces them.
- *
- * @return If the notification icon was replaced.
- */
 private fun setNotificationIconResource(
     originalNotificationIconName: String,
     iconStyle: String,
-    customIcon: String?
+    customIcon: String?,
+    hasBundledCustomIcon: Boolean = false
 ): Boolean {
-    if (!hasMountedNotificationIcon(iconStyle, customIcon)) return false
+    if (!hasMountedNotificationIcon(iconStyle, customIcon, hasBundledCustomIcon)) return false
 
     val vectorIcon: ByteArray?
-    val rasterIcons: Map<String, File>
+    val rasterIcons: Map<String, ByteArray>
 
     if (iconStyle == CUSTOM_USER_ICON_STYLE_NAME) {
-        val iconPathFile = File(customIcon!!.trim())
+        if (customIcon != null) {
+            val iconPathFile = File(customIcon.trim())
 
-        vectorIcon = iconPathFile
-            .resolve("drawable/$USER_CUSTOM_NOTIFICATION_ICON_XML_FILE_NAME")
-            .takeIf { it.exists() }
-            ?.readBytes()
+            vectorIcon = iconPathFile
+                .resolve("drawable/$USER_CUSTOM_NOTIFICATION_ICON_XML_FILE_NAME")
+                .takeIf { it.exists() }
+                ?.readBytes()
 
-        rasterIcons = notificationIconPngDirectories.keys.mapNotNull { dpi ->
-            val sourceFile = iconPathFile.resolve("$dpi/$USER_CUSTOM_NOTIFICATION_ICON_PNG_FILE_NAME")
-            if (sourceFile.exists()) dpi to sourceFile else null
-        }.toMap()
+            rasterIcons = notificationIconPngDirectories.keys.mapNotNull { dpi ->
+                val sourceFile = iconPathFile.resolve("$dpi/$USER_CUSTOM_NOTIFICATION_ICON_PNG_FILE_NAME")
+                if (sourceFile.exists()) dpi to sourceFile.readBytes() else null
+            }.toMap()
+        } else {
+            vectorIcon = bundledBrandingResource("drawable/$USER_CUSTOM_NOTIFICATION_ICON_XML_FILE_NAME")
+
+            rasterIcons = notificationIconPngDirectories.keys.mapNotNull { dpi ->
+                val bytes = bundledBrandingResource("$dpi/$USER_CUSTOM_NOTIFICATION_ICON_PNG_FILE_NAME")
+                if (bytes != null) dpi to bytes else null
+            }.toMap()
+        }
     } else {
         vectorIcon = bundledBrandingResource("drawable/${NOTIFICATION_ICON_NAME}_$iconStyle.xml")
             ?: throw PatchException("Could not find the bundled notification icon style: $iconStyle")
@@ -809,8 +713,6 @@ private fun setNotificationIconResource(
     }
 
     if (removedIcons == 0) {
-        // Not fatal, because the launcher icon and the app name are the visible part of the
-        // branding and patching should not fail if only the notification icon was renamed.
         logger.warning(
             "Could not find the notification icon to replace: @drawable/$originalNotificationIconName"
         )
@@ -823,21 +725,15 @@ private fun setNotificationIconResource(
         targetFile.writeBytes(vectorIcon)
     }
 
-    rasterIcons.forEach { (dpi, sourceFile) ->
+    rasterIcons.forEach { (dpi, bytes) ->
         val targetFile = resourceFile("res/$dpi/$originalNotificationIconName.png")
         targetFile.parentFile.mkdirs()
-        sourceFile.copyTo(
-            target = targetFile,
-            overwrite = true
-        )
+        targetFile.writeBytes(bytes)
     }
 
     return true
 }
 
-/**
- * Replaces the adaptive launcher icon of the app with a bundled icon style.
- */
 private fun setLauncherIconResource(
     originalLauncherIconName: String,
     iconStyle: String
@@ -847,12 +743,10 @@ private fun setLauncherIconResource(
     resourceXml("AndroidManifest.xml").use { manifest ->
         val application = manifest.elements("application").first()
 
-        // Some launchers show the round icon, and it can point to a different resource.
         arrayOf("android:icon", "android:roundIcon").forEach { attributeName ->
             val reference = application.attribute(attributeName).orEmpty()
             val typeIndex = reference.indexOf('/')
 
-            // Framework resources such as '@android:mipmap/sym_def_app_icon' cannot be replaced.
             if (!reference.startsWith("@") || typeIndex < 0 || reference.contains(':')) {
                 return@forEach
             }
@@ -869,9 +763,6 @@ private fun setLauncherIconResource(
 
     iconReferences.forEach { (resourceType, resourceName) ->
         listDecodableFiles("res/$resourceType*/$resourceName.xml").forEach { path ->
-            // Only the adaptive icon is replaced. A raster icon of the same name is used by
-            // Android 7 and older, which the target apps no longer support.
-            // Replaced without decoding it.
             resourceFile(path, false).writeBytes(bundledIcon)
             replacedIcons++
         }
