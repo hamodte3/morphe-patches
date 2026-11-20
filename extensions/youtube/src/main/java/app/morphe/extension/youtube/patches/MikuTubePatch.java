@@ -1,6 +1,11 @@
 package app.morphe.extension.youtube.patches;
 
+import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
+import android.os.Build;
+import android.os.Bundle;
+import android.view.Window;
 
 import java.io.File;
 import java.lang.reflect.Method;
@@ -119,8 +124,52 @@ public final class MikuTubePatch {
         if (context == null || !INITIALIZED.compareAndSet(false, true)) {
             return;
         }
+        if (context instanceof Activity) {
+            disableSystemBarContrast((Activity) context);
+        }
+        Context appContext = context.getApplicationContext();
+        registerStatusBarFix(appContext);
         seedDefaultSettingsOnce(context);
-        scheduleSmartCacheCleaner(context.getApplicationContext());
+        scheduleSmartCacheCleaner(appContext);
+    }
+
+    private static void registerStatusBarFix(Context appContext) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        if (!(appContext instanceof Application)) return;
+
+        ((Application) appContext).registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
+                disableSystemBarContrast(activity);
+            }
+
+            @Override
+            public void onActivityStarted(Activity activity) {
+                disableSystemBarContrast(activity);
+            }
+
+            @Override
+            public void onActivityResumed(Activity activity) {
+                disableSystemBarContrast(activity);
+            }
+
+            @Override public void onActivityPaused(Activity activity) {}
+            @Override public void onActivityStopped(Activity activity) {}
+            @Override public void onActivitySaveInstanceState(Activity activity, Bundle outState) {}
+            @Override public void onActivityDestroyed(Activity activity) {}
+        });
+    }
+
+    private static void disableSystemBarContrast(Activity activity) {
+        if (activity == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        try {
+            Window window = activity.getWindow();
+            if (window != null) {
+                window.setStatusBarContrastEnforced(false);
+                window.setNavigationBarContrastEnforced(false);
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void seedDefaultSettingsOnce(Context context) {
