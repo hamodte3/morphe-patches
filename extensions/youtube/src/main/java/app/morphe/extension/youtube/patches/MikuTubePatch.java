@@ -21,7 +21,6 @@ public final class MikuTubePatch {
     private static final String DEFAULT_SETTINGS =
             "\"app_refresh_rate\": \"120\",\n"
             + "\"app_refresh_rate_type\": \"portrait\",\n"
-            + "\"custom_branding_name\": 1,\n"
             + "\"custom_branding_notification_icon\": \"original\",\n"
             + "\"debug_toast_on_error\": false,\n"
             + "\"disable_auto_feed_refresh\": true,\n"
